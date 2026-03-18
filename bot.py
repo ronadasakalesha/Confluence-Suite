@@ -264,7 +264,8 @@ def rsi(series: np.ndarray, length: int = 14) -> np.ndarray:
     loss  = np.where(delta < 0, -delta, 0.0)
     avg_gain = rma(gain, length)
     avg_loss = rma(loss, length)
-    rs = np.where(avg_loss > 0, avg_gain / avg_loss, np.inf)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        rs = np.where(avg_loss > 0, avg_gain / avg_loss, np.inf)
     return 100 - 100 / (1 + rs)
 
 
@@ -724,10 +725,11 @@ def nn_regime_score_arr(high: np.ndarray, low: np.ndarray, close: np.ndarray, is
         pdm[i] = max(pdm_r, 0.0) if pdm_r > mdm_r else 0.0
         mdm[i] = max(mdm_r, 0.0) if mdm_r > pdm_r else 0.0
     atr30 = rma(tr,  30)
-    pdi   = np.where(atr30 > 0, 100 * rma(pdm, 30) / atr30, 0.0)
-    mdi   = np.where(atr30 > 0, 100 * rma(mdm, 30) / atr30, 0.0)
-    denom = pdi + mdi
-    dx    = np.where(denom > 0, np.abs(pdi - mdi) / denom * 100, 0.0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        pdi   = np.where(atr30 > 0, 100 * rma(pdm, 30) / atr30, 0.0)
+        mdi   = np.where(atr30 > 0, 100 * rma(mdm, 30) / atr30, 0.0)
+        denom = pdi + mdi
+        dx    = np.where(denom > 0, np.abs(pdi - mdi) / denom * 100, 0.0)
     adx   = rma(dx, 30)
     result = np.full(n, -0.2)
     for i in range(n):
@@ -805,7 +807,8 @@ def nn_volume_score_arr(close: np.ndarray, high: np.ndarray, low: np.ndarray,
             uv[i] = max(uv[i-1], 0)
             dv[i] = min(dv[i-1], 0)
     tot   = uv + np.abs(dv)
-    ratio = np.where(tot > 0, (uv - np.abs(dv)) / tot, 0.0)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ratio = np.where(tot > 0, (uv - np.abs(dv)) / tot, 0.0)
     return ratio if is_buy else -ratio
 
 
