@@ -61,12 +61,21 @@ NPC_INNER = 1.5
 NPC_OUTER = 2.5
 
 # Delta Exchange API
-DELTA_BASE    = "https://api.delta.exchange"
+# Base URL: India exchange (api.india.delta.exchange) per official docs
+DELTA_BASE    = "https://api.india.delta.exchange"
 SYMBOL_MAP    = {"BTC": "BTCUSD", "ETH": "ETHUSD"}
-CANDLE_RESOLUTION = 60     # 1-hour in minutes
-CANDLE_LIMIT      = 1000   # how many bars to fetch
+# Resolution must be a string like "1m", "5m", "15m", "1h", "4h", "1d"
+CANDLE_RESOLUTION = "1h"  # 1-hour candles
+CANDLE_LIMIT      = 500   # candles to fetch (API max is 2000)
 
-# Polling interval: run once per hour, 5 seconds after candle close
+# Seconds per candle for each string resolution
+_RESOLUTION_SECONDS = {
+    "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
+    "1h": 3600, "2h": 7200, "4h": 14400, "6h": 21600,
+    "8h": 28800, "12h": 43200, "1d": 86400,
+}
+
+# Polling interval: run once per hour, a few seconds after candle close
 POLL_INTERVAL_SECONDS = 3600
 
 
@@ -74,39 +83,47 @@ POLL_INTERVAL_SECONDS = 3600
 # DELTA EXCHANGE — DATA FETCH
 # ─────────────────────────────────────────────────────────────
 
-def fetch_ohlcv(symbol: str, resolution: int = 60, limit: int = 1000) -> pd.DataFrame:
+def fetch_ohlcv(symbol: str, resolution: str = "1h", limit: int = 500) -> pd.DataFrame:
     """
     Fetch OHLCV candles from Delta Exchange public API.
+    - resolution: string e.g. "1h", "5m", "1d"  (as per Delta Exchange docs)
+    - limit:      number of candles to fetch (API max = 2000)
     Returns a DataFrame with columns: time, open, high, low, close, volume.
     Candles are sorted oldest → newest.
     """
-    now = int(time.time())
-    # Each candle = resolution * 60 seconds
-    start = now - limit * resolution * 60
+    now   = int(time.time())
+    secs  = _RESOLUTION_SECONDS.get(resolution, 3600)   # seconds per candle
+    start = now - limit * secs
 
-    url = f"{DELTA_BASE}/v2/history/candles"
+    url    = f"{DELTA_BASE}/v2/history/candles"
     params = {
-        "resolution": str(resolution),
+        "resolution": resolution,
         "symbol":     symbol,
         "start":      str(start),
         "end":        str(now),
     }
+    log.debug(f"GET {url} params={params}")
     resp = requests.get(url, params=params, timeout=15)
-    resp.raise_for_status()
+
+    if not resp.ok:
+        # Log the full response body so we see Delta's error message clearly
+        log.error(f"Delta API error {resp.status_code}: {resp.text[:500]}")
+        resp.raise_for_status()
+
     data = resp.json()
 
     candles = data.get("result", [])
     if not candles:
-        raise ValueError(f"No candle data returned for {symbol}")
+        raise ValueError(f"No candle data returned for {symbol} — response: {data}")
 
     df = pd.DataFrame(candles)
     # Delta returns: time (unix), open, high, low, close, volume
-    df = df.rename(columns={"time": "time", "open": "open", "high": "high",
-                             "low": "low", "close": "close", "volume": "volume"})
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["time"] = pd.to_numeric(df["time"], errors="coerce")
     df = df.sort_values("time").reset_index(drop=True)
+    log.info(f"Fetched {len(df)} candles for {symbol} ({resolution}) up to "
+             f"{datetime.fromtimestamp(df['time'].iloc[-1], tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
     return df
 
 
